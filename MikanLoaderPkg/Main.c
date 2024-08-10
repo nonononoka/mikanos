@@ -6,36 +6,31 @@
 #include  <Protocol/SimpleFileSystem.h>
 #include  <Protocol/DiskIo2.h>
 #include  <Protocol/BlockIo.h>
+#include  <Guid/FileInfo.h>
 
-struct MemoryMap
-{
+struct MemoryMap {
   UINTN buffer_size;
-  VOID *buffer;
+  VOID* buffer;
   UINTN map_size;
   UINTN map_key;
   UINTN descriptor_size;
   UINT32 descriptor_version;
 };
 
-EFI_STATUS GetMemoryMap(struct MemoryMap *map)
-{
-  if (map->buffer == NULL)
-  {
+EFI_STATUS GetMemoryMap(struct MemoryMap* map) {
+  if (map->buffer == NULL) {
     return EFI_BUFFER_TOO_SMALL;
   }
 
   map->map_size = map->buffer_size;
-
-  // GetMemoryMap: 関数呼び出し時点のメモリマップを取得し、引数MemoryMap(2番目)で指定されたメモリ領域に書き込む。
   return gBS->GetMemoryMap(
-      &map->map_size,                       // 出力として実際のメモリマップの大きさが設定される
-      (EFI_MEMORY_DESCRIPTOR *)map->buffer, // メモリマップ書き込み用の先頭ポインタ
-      &map->map_key,                        // メモリマップを識別するための値を書き込む変数
-      &map->descriptor_size,                // メモリマップ個々の行を表すメモリディスクリプタ(typeとかフィールド名とか説明とか)のバイト数
-      &map->descriptor_version);            // メモリディスクリプタの構造体のバージョン番号
+      &map->map_size,
+      (EFI_MEMORY_DESCRIPTOR*)map->buffer,
+      &map->map_key,
+      &map->descriptor_size,
+      &map->descriptor_version);
 }
 
-// #@@range_begin(get_memory_type)
 const CHAR16* GetMemoryTypeUnicode(EFI_MEMORY_TYPE type) {
   switch (type) {
     case EfiReservedMemoryType: return L"EfiReservedMemoryType";
@@ -58,7 +53,6 @@ const CHAR16* GetMemoryTypeUnicode(EFI_MEMORY_TYPE type) {
   }
 }
 
-// #@@range_begin(save_memory_map)
 EFI_STATUS SaveMemoryMap(struct MemoryMap* map, EFI_FILE_PROTOCOL* file) {
   CHAR8 buf[256];
   UINTN len;
@@ -73,14 +67,10 @@ EFI_STATUS SaveMemoryMap(struct MemoryMap* map, EFI_FILE_PROTOCOL* file) {
 
   EFI_PHYSICAL_ADDRESS iter;
   int i;
-
-  // メモリマップの各行をカンマ区切りにして出力
   for (iter = (EFI_PHYSICAL_ADDRESS)map->buffer, i = 0;
        iter < (EFI_PHYSICAL_ADDRESS)map->buffer + map->map_size;
        iter += map->descriptor_size, i++) {
     EFI_MEMORY_DESCRIPTOR* desc = (EFI_MEMORY_DESCRIPTOR*)iter;
-
-    // メモリディスクリプタの内容を文字列に変換
     len = AsciiSPrint(
         buf, sizeof(buf),
         "%u, %x, %-ls, %08lx, %lx, %lx\n",
@@ -120,25 +110,71 @@ EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EFI_FILE_PROTOCOL** root) {
 
 EFI_STATUS EFIAPI UefiMain(
     EFI_HANDLE image_handle,
-    EFI_SYSTEM_TABLE *system_table)
-{
+    EFI_SYSTEM_TABLE* system_table) {
   Print(L"Hello, Mikan World!\n");
+
   CHAR8 memmap_buf[4096 * 4];
   struct MemoryMap memmap = {sizeof(memmap_buf), memmap_buf, 0, 0, 0, 0};
   GetMemoryMap(&memmap);
 
-  // MemoryMap書き込み用ファイルを開く
-  EFI_FILE_PROTOCOL *root_dir;
+  EFI_FILE_PROTOCOL* root_dir;
   OpenRootDir(image_handle, &root_dir);
-  EFI_FILE_PROTOCOL *memmap_file;
+
+  EFI_FILE_PROTOCOL* memmap_file;
   root_dir->Open(
       root_dir, &memmap_file, L"\\memmap",
       EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0);
-  
-  // 保存する
+
   SaveMemoryMap(&memmap, memmap_file);
   memmap_file->Close(memmap_file);
-  // #@@range_end(main)
+
+  // #@@range_begin(read_kernel)
+  EFI_FILE_PROTOCOL* kernel_file;
+  root_dir->Open(
+      root_dir, &kernel_file, L"\\kernel.elf",
+      EFI_FILE_MODE_READ, 0);
+
+  UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(CHAR16) * 12;
+  UINT8 file_info_buffer[file_info_size];
+  kernel_file->GetInfo(
+      kernel_file, &gEfiFileInfoGuid,
+      &file_info_size, file_info_buffer);
+
+  EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
+  UINTN kernel_file_size = file_info->FileSize;
+
+  EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000;
+  gBS->AllocatePages(
+      AllocateAddress, EfiLoaderData,
+      (kernel_file_size + 0xfff) / 0x1000, &kernel_base_addr);
+  kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_base_addr);
+  Print(L"Kernel: 0x%0lx (%lu bytes)\n", kernel_base_addr, kernel_file_size);
+  // #@@range_end(read_kernel)
+
+  // #@@range_begin(exit_bs)
+  EFI_STATUS status;
+  status = gBS->ExitBootServices(image_handle, memmap.map_key);
+  if (EFI_ERROR(status)) {
+    status = GetMemoryMap(&memmap);
+    if (EFI_ERROR(status)) {
+      Print(L"failed to get memory map: %r\n", status);
+      while (1);
+    }
+    status = gBS->ExitBootServices(image_handle, memmap.map_key);
+    if (EFI_ERROR(status)) {
+      Print(L"Could not exit boot service: %r\n", status);
+      while (1);
+    }
+  }
+  // #@@range_end(exit_bs)
+
+  // #@@range_begin(call_kernel)
+  UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
+
+  typedef void EntryPointType(void);
+  EntryPointType* entry_point = (EntryPointType*)entry_addr;
+  entry_point();
+  // #@@range_end(call_kernel)
 
   Print(L"All done\n");
 
