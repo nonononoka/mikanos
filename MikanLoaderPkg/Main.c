@@ -171,11 +171,9 @@ const CHAR16* GetPixelFormatUnicode(EFI_GRAPHICS_PIXEL_FORMAT fmt) {
   }
 }
 
-// #@@range_begin(halt)
 void Halt(void) {
   while (1) __asm__("hlt");
 }
-// #@@range_end(halt)
 
 EFI_STATUS EFIAPI UefiMain(
     EFI_HANDLE image_handle,
@@ -296,6 +294,8 @@ EFI_STATUS EFIAPI UefiMain(
   }
   // #@@range_end(exit_bs)
 
+  UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
+
   struct FrameBufferConfig config = {
     (UINT8*)gop->Mode->FrameBufferBase,
     gop->Mode->Info->PixelsPerScanLine,
@@ -303,8 +303,7 @@ EFI_STATUS EFIAPI UefiMain(
     gop->Mode->Info->VerticalResolution,
     0
   };
-
-   switch (gop->Mode->Info->PixelFormat) {
+  switch (gop->Mode->Info->PixelFormat) {
     case PixelRedGreenBlueReserved8BitPerColor:
       config.pixel_format = kPixelRGBResv8BitPerColor;
       break;
@@ -315,8 +314,6 @@ EFI_STATUS EFIAPI UefiMain(
       Print(L"Unimplemented pixel format: %d\n", gop->Mode->Info->PixelFormat);
       Halt();
   }
-
-  UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
 
   typedef void EntryPointType(const struct FrameBufferConfig*);
   EntryPointType* entry_point = (EntryPointType*)entry_addr;
