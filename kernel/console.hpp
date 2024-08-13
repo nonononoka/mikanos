@@ -4,6 +4,7 @@
 
 class Console {
  public:
+ // コンソールの表示領域の大きさ
   static const int kRows = 25, kColumns = 80;
 
   Console(PixelWriter& writer,
