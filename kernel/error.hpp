@@ -27,6 +27,7 @@ class Error {
     kUnknownXHCISpeedID,
     kNoWaiter,
     kNoPCIMSI,
+    kUnknownPixelFormat,
     kLastOfCode,  // この列挙子は常に最後に配置する
   };
 
@@ -53,6 +54,7 @@ class Error {
     "kUnknownXHCISpeedID",
     "kNoWaiter",
     "kNoPCIMSI",
+    "kUnknownPixelFormat",
   };
   static_assert(Error::Code::kLastOfCode == code_names_.size());
 
@@ -87,10 +89,8 @@ class Error {
 
 #define MAKE_ERROR(code) Error((code), __FILE__, __LINE__)
 
-// #@@range_begin(with_error)
 template <class T>
 struct WithError {
   T value;
   Error error;
 };
-// #@@range_end(with_error)
