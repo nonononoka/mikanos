@@ -82,3 +82,5 @@ class Window {
   FrameBuffer shadow_buffer_{};
   // #@@range_end(fields)
 };
+
+void DrawWindow(PixelWriter& writer, const char* title);
