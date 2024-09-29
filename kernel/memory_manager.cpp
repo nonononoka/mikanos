@@ -5,6 +5,7 @@ BitmapMemoryManager::BitmapMemoryManager()
 }
 
 // #@@range_begin(allocate)
+// 連続でその大きさ以上の空きがある領域を探して割り当てる
 WithError<FrameID> BitmapMemoryManager::Allocate(size_t num_frames) {
   size_t start_frame_id = range_begin_.ID();
   while (true) {
@@ -75,3 +76,19 @@ void BitmapMemoryManager::SetBit(FrameID frame, bool allocated) {
   }
 }
 // #@@range_end(get_set_bit)
+
+// #@@range_begin(set_program_break)
+extern "C" caddr_t program_break, program_break_end;
+
+Error InitializeHeap(BitmapMemoryManager& memory_manager) {
+  const int kHeapFrames = 64 * 512;
+  const auto heap_start = memory_manager.Allocate(kHeapFrames);
+  if (heap_start.error) {
+    return heap_start.error;
+  }
+
+  program_break = reinterpret_cast<caddr_t>(heap_start.value.ID() * kBytesPerFrame);
+  program_break_end = program_break + kHeapFrames * kBytesPerFrame;
+  return MAKE_ERROR(Error::kSuccess);
+}
+// #@@range_end(set_program_break)
