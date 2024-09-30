@@ -22,6 +22,17 @@ Vector2D<int> Layer::GetPosition() const {
   return pos_;
 }
 
+// #@@range_begin(set_draggable)
+Layer& Layer::SetDraggable(bool draggable) {
+  draggable_ = draggable;
+  return *this;
+}
+
+bool Layer::IsDraggable() const {
+  return draggable_;
+}
+// #@@range_end(set_draggable)
+
 Layer& Layer::Move(Vector2D<int> pos) {
   pos_ = pos;
   return *this;
@@ -39,7 +50,6 @@ void Layer::DrawTo(FrameBuffer& screen, const Rectangle<int>& area) const {
 }
 
 
-// #@@range_begin(set_writer)
 void LayerManager::SetWriter(FrameBuffer* screen) {
   screen_ = screen;
 
@@ -47,23 +57,19 @@ void LayerManager::SetWriter(FrameBuffer* screen) {
   back_config.frame_buffer = nullptr;
   back_buffer_.Initialize(back_config);
 }
-// #@@range_end(set_writer)
 
 Layer& LayerManager::NewLayer() {
   ++latest_id_;
   return *layers_.emplace_back(new Layer{latest_id_});
 }
 
-// #@@range_begin(draw_area)
 void LayerManager::Draw(const Rectangle<int>& area) const {
   for (auto layer : layer_stack_) {
     layer->DrawTo(back_buffer_, area);
   }
   screen_->Copy(area.pos, back_buffer_, area);
 }
-// #@@range_end(draw_area)
 
-// #@@range_begin(draw_layer)
 void LayerManager::Draw(unsigned int id) const {
   bool draw = false;
   Rectangle<int> window_area;
@@ -79,7 +85,6 @@ void LayerManager::Draw(unsigned int id) const {
   }
   screen_->Copy(window_area.pos, back_buffer_, window_area);
 }
-// #@@range_end(draw_layer)
 
 void LayerManager::Move(unsigned int id, Vector2D<int> new_pos) {
   auto layer = FindLayer(id);
@@ -130,6 +135,27 @@ void LayerManager::Hide(unsigned int id) {
   if (pos != layer_stack_.end()) {
     layer_stack_.erase(pos);
   }
+}
+
+Layer* LayerManager::FindLayerByPosition(Vector2D<int> pos, unsigned int exclude_id) const {
+  auto pred = [pos, exclude_id](Layer* layer) {
+    if (layer->ID() == exclude_id) {
+      return false;
+    }
+    const auto& win = layer->GetWindow();
+    if (!win) {
+      return false;
+    }
+    const auto win_pos = layer->GetPosition();
+    const auto win_end_pos = win_pos + win->Size();
+    return win_pos.x <= pos.x && pos.x < win_end_pos.x &&
+           win_pos.y <= pos.y && pos.y < win_end_pos.y;
+  };
+  auto it = std::find_if(layer_stack_.rbegin(), layer_stack_.rend(), pred);
+  if (it == layer_stack_.rend()) {
+    return nullptr;
+  }
+  return *it;
 }
 
 Layer* LayerManager::FindLayer(unsigned int id) {
