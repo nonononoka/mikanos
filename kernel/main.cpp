@@ -32,8 +32,7 @@
 #include "message.hpp"
 #include "timer.hpp"
 
-int printk(const char *format, ...)
-{
+int printk(const char* format, ...) {
   va_list ap;
   int result;
   char s[1024];
@@ -48,30 +47,27 @@ int printk(const char *format, ...)
 
 std::shared_ptr<Window> main_window;
 unsigned int main_window_layer_id;
-void InitializeMainWindow()
-{
+void InitializeMainWindow() {
   main_window = std::make_shared<Window>(
       160, 52, screen_config.pixel_format);
   DrawWindow(*main_window->Writer(), "Hello Window");
 
   main_window_layer_id = layer_manager->NewLayer()
-                             .SetWindow(main_window)
-                             .SetDraggable(true)
-                             .Move({300, 100})
-                             .ID();
+    .SetWindow(main_window)
+    .SetDraggable(true)
+    .Move({300, 100})
+    .ID();
 
   layer_manager->UpDown(main_window_layer_id, std::numeric_limits<int>::max());
 }
 
-std::deque<Message> *main_queue;
+std::deque<Message>* main_queue;
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];
 
-// #@@range_begin(main_function)
 extern "C" void KernelMainNewStack(
-    const FrameBufferConfig &frame_buffer_config_ref,
-    const MemoryMap &memory_map_ref)
-{
+    const FrameBufferConfig& frame_buffer_config_ref,
+    const MemoryMap& memory_map_ref) {
   MemoryMap memory_map{memory_map_ref};
 
   InitializeGraphics(frame_buffer_config_ref);
@@ -93,15 +89,17 @@ extern "C" void KernelMainNewStack(
   InitializeMainWindow();
   InitializeMouse();
   layer_manager->Draw({{0, 0}, ScreenSize()});
-  // #@@range_end(main_function)
-  InitializeLAPICTimer();
+
+  // #@@range_begin(add_sample_timer)
+  InitializeLAPICTimer(*main_queue);
+
+  timer_manager->AddTimer(Timer(200, 2));
+  timer_manager->AddTimer(Timer(600, -1));
+  // #@@range_end(add_sample_timer)
 
   char str[128];
-  unsigned int count = 0;
 
-  while (true)
-  {
-    // #@@range_begin(show_tick)
+  while (true) {
     __asm__("cli");
     const auto tick = timer_manager->CurrentTick();
     __asm__("sti");
@@ -121,22 +119,26 @@ extern "C" void KernelMainNewStack(
     main_queue->pop_front();
     __asm__("sti");
 
-    switch (msg.type)
-    {
+    switch (msg.type) {
     case Message::kInterruptXHCI:
       usb::xhci::ProcessEvents();
       break;
-    case Message::kInterruptLAPICTimer:
-      printk("Timer interrupt\n");
+    // #@@range_begin(timer_event)
+    case Message::kTimerTimeout:
+      printk("Timer: timeout = %lu, value = %d\n",
+          msg.arg.timer.timeout, msg.arg.timer.value);
+      if (msg.arg.timer.value > 0) {
+        timer_manager->AddTimer(Timer(
+            msg.arg.timer.timeout + 100, msg.arg.timer.value + 1));
+      }
       break;
+    // #@@range_end(timer_event)
     default:
       Log(kError, "Unknown message type: %d\n", msg.type);
     }
   }
 }
 
-extern "C" void __cxa_pure_virtual()
-{
-  while (1)
-    __asm__("hlt");
+extern "C" void __cxa_pure_virtual() {
+  while (1) __asm__("hlt");
 }
