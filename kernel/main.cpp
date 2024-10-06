@@ -207,6 +207,7 @@ extern "C" void KernelMainNewStack(
   bool textbox_cursor_visible = false;
 
   // #@@range_begin(init_taskb)
+  // vectorだからheap領域に確保されてる.
   std::vector<uint64_t> task_b_stack(1024);
   uint64_t task_b_stack_end = reinterpret_cast<uint64_t>(&task_b_stack[1024]);
 
