@@ -9,9 +9,9 @@
 #include  <Protocol/DiskIo2.h>
 #include  <Protocol/BlockIo.h>
 #include  <Guid/FileInfo.h>
-#include  "../kernel/frame_buffer_config.hpp"
-#include  "../kernel/elf.hpp"
-#include "../kernel/memory_map.hpp"
+#include  "frame_buffer_config.hpp"
+#include  "memory_map.hpp"
+#include  "elf.hpp"
 
 EFI_STATUS GetMemoryMap(struct MemoryMap* map) {
   if (map->buffer == NULL) {
@@ -169,8 +169,6 @@ void Halt(void) {
   while (1) __asm__("hlt");
 }
 
-// カーネルファイルの全てのロードセグメントをめぐり、アドレス範囲を更新していく。
-// #@@range_begin(calc_addr_func)
 void CalcLoadAddressRange(Elf64_Ehdr* ehdr, UINT64* first, UINT64* last) {
   Elf64_Phdr* phdr = (Elf64_Phdr*)((UINT64)ehdr + ehdr->e_phoff);
   *first = MAX_UINT64;
@@ -181,9 +179,7 @@ void CalcLoadAddressRange(Elf64_Ehdr* ehdr, UINT64* first, UINT64* last) {
     *last = MAX(*last, phdr[i].p_vaddr + phdr[i].p_memsz);
   }
 }
-// #@@range_end(calc_addr_func)
 
-// #@@range_begin(copy_segm_func) 一時領域から最終領域にロードセグメントをコピーする。
 void CopyLoadSegments(Elf64_Ehdr* ehdr) {
   Elf64_Phdr* phdr = (Elf64_Phdr*)((UINT64)ehdr + ehdr->e_phoff);
   for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i) {
@@ -196,7 +192,6 @@ void CopyLoadSegments(Elf64_Ehdr* ehdr) {
     SetMem((VOID*)(phdr[i].p_vaddr + phdr[i].p_filesz), remain_bytes, 0);
   }
 }
-// #@@range_end(copy_segm_func)
 
 EFI_STATUS EFIAPI UefiMain(
     EFI_HANDLE image_handle,
@@ -284,24 +279,18 @@ EFI_STATUS EFIAPI UefiMain(
   EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
   UINTN kernel_file_size = file_info->FileSize;
 
-  // #@@range_begin(alloc_error)
   VOID* kernel_buffer;
-  // カーネルファイルを読み込むための一時領域を確保するために使っている。
   status = gBS->AllocatePool(EfiLoaderData, kernel_file_size, &kernel_buffer);
   if (EFI_ERROR(status)) {
-    Print(L"failed to allocate pool: %r", status);
+    Print(L"failed to allocate pool: %r\n", status);
     Halt();
   }
-  // #@@range_end(alloc_error)
-  // カーネルファイルの内容を一時領域に読み込む。
   status = kernel_file->Read(kernel_file, &kernel_file_size, kernel_buffer);
   if (EFI_ERROR(status)) {
     Print(L"error: %r", status);
     Halt();
   }
-  // #@@range_end(read_kernel)
 
-  // #@@range_begin(alloc_pages) コピー先のメモリ領域の確保
   Elf64_Ehdr* kernel_ehdr = (Elf64_Ehdr*)kernel_buffer;
   UINT64 kernel_first_addr, kernel_last_addr;
   CalcLoadAddressRange(kernel_ehdr, &kernel_first_addr, &kernel_last_addr);
@@ -313,9 +302,7 @@ EFI_STATUS EFIAPI UefiMain(
     Print(L"failed to allocate pages: %r\n", status);
     Halt();
   }
-  // #@@range_end(alloc_pages)
 
-  // #@@range_begin(copy_segments)
   CopyLoadSegments(kernel_ehdr);
   Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
 
@@ -324,9 +311,7 @@ EFI_STATUS EFIAPI UefiMain(
     Print(L"failed to free pool: %r\n", status);
     Halt();
   }
-  // #@@range_end(copy_segments)
 
-  // #@@range_begin(exit_bs)
   status = gBS->ExitBootServices(image_handle, memmap.map_key);
   if (EFI_ERROR(status)) {
     status = GetMemoryMap(&memmap);
@@ -340,7 +325,6 @@ EFI_STATUS EFIAPI UefiMain(
       Halt();
     }
   }
-  // #@@range_end(exit_bs)
 
   UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
 
@@ -363,9 +347,22 @@ EFI_STATUS EFIAPI UefiMain(
       Halt();
   }
 
-  typedef void EntryPointType(const struct FrameBufferConfig*, const struct MemoryMap*);
+  // #@@range_begin(get_acpitable)
+  VOID* acpi_table = NULL;
+  for (UINTN i = 0; i < system_table->NumberOfTableEntries; ++i) {
+    if (CompareGuid(&gEfiAcpiTableGuid,
+                    &system_table->ConfigurationTable[i].VendorGuid)) {
+      acpi_table = system_table->ConfigurationTable[i].VendorTable;
+      break;
+    }
+  }
+
+  typedef void EntryPointType(const struct FrameBufferConfig*,
+                              const struct MemoryMap*,
+                              const VOID*);
   EntryPointType* entry_point = (EntryPointType*)entry_addr;
-  entry_point(&config, &memmap);
+  entry_point(&config, &memmap, acpi_table);
+  // #@@range_end(get_acpitable)
 
   Print(L"All done\n");
 
